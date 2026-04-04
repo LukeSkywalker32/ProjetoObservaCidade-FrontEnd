@@ -98,10 +98,9 @@ export default function Map() {
   }, []);
 
 
-
   // Buscar nome da cidade
   useEffect(() => {
-    if (userLocation && "isGuest") {
+    if (userLocation && !isGuest) {
       const fetchCity = async () => {
         try {
           const response = await api.get("/private/geocode/city", {
@@ -116,7 +115,7 @@ export default function Map() {
         }
       };
       fetchCity();
-    } else if (isGuest) {
+    } else {
       setCityName(""); //Se for convidado e não tiver localização, deixa vazio
     }
   }, [userLocation, isGuest]);
