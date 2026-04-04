@@ -200,6 +200,18 @@
   dependencies:
     tslib "^2.1.0"
 
+"@capacitor/geolocation@^8.2.0":
+  version "8.2.0"
+  resolved "https://registry.npmmirror.com/@capacitor/geolocation/-/geolocation-8.2.0.tgz#aaa8625aca6e1c72119396490b26e817c4c4cfe8"
+  integrity sha512-N29QcoIPmme0xSxRkm7+3hjoHp6mBAOarxecvtCCZKyOBeKiJsFUq981cezg2XWBa6fhCXJMCCjQPngKK/dIag==
+  dependencies:
+    "@capacitor/synapse" "^1.0.4"
+
+"@capacitor/synapse@^1.0.4":
+  version "1.0.4"
+  resolved "https://registry.npmmirror.com/@capacitor/synapse/-/synapse-1.0.4.tgz#c6beb33119d9656b1f04cb7783989fb78933ef6d"
+  integrity sha512-/C1FUo8/OkKuAT4nCIu/34ny9siNHr9qtFezu4kxm6GY1wNFxrCFWjfYx5C1tUhVGz3fxBABegupkpjXvjCHrw==
+
 "@esbuild/aix-ppc64@0.21.5":
   version "0.21.5"
   resolved "https://registry.yarnpkg.com/@esbuild/aix-ppc64/-/aix-ppc64-0.21.5.tgz#c7184a326533fcdf1b8ee0733e21c713b975575f"

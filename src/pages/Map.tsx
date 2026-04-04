@@ -1,3 +1,4 @@
+import { Geolocation } from '@capacitor/geolocation';
 import {
   GoogleMap,
   InfoWindow,
@@ -77,19 +78,26 @@ export default function Map() {
 
   // Buscar localização do usuário
   useEffect(() => {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setUserLocation({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        });
-      },
-      () => {
-        console.error("Erro ao obter localização");
-      },
-    );
+    const getLocation = async() =>{
+      try {
+        const permission = await Geolocation.requestPermissions();
+
+        if(permission.location === "granted") {
+          const position = await Geolocation.getCurrentPosition();
+
+          setUserLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          })
+        }
+      } catch (error) {
+        console.error("Erro ao obter localização:", error);
+      }
+    }
+    getLocation();
   }, []);
+
+
 
   // Buscar nome da cidade
   useEffect(() => {
