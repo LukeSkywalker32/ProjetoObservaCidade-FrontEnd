@@ -21,18 +21,11 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
+import { OCCURRENCE_TYPES } from "../constants/occurrenceTypes";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../services/api";
-// ↑ GoogleMap: componente principal do mapa
-// ↑ InfoWindow: janela que aparece ao clicar no marker
-// ↑ Marker: pino colorido no mapa
-// ↑ useJsApiLoader: hook que carrega a chave da API do Google Maps de forma assíncrona
-import { createMarkerIcon } from "../utils/getMarkerIcon";
-// ↑ reutilizamos a mesma função do Map.tsx que gera o ícone colorido com base no tipo
 import { formatRelativeTime } from "../utils/dateUtils";
-// ↑ reutilizamos o formatador de data relativa igual ao Map.tsx
-import { OCCURRENCE_TYPES } from "../constants/occurrenceTypes";
-// ↑ reutilizamos as constantes de tipos para determinar a cor de cada marker
+import { createMarkerIcon } from "../utils/getMarkerIcon";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,6 +69,7 @@ type MapOccurrence = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Formata a data para o formato brasileiro
 function formatDate(date: string) {
   return new Date(date).toLocaleString("pt-BR", {
     day: "2-digit",
@@ -86,11 +80,13 @@ function formatDate(date: string) {
   });
 }
 
+// Mascara o CPF
 function maskCPF(cpf: string) {
   if (!cpf) return "---";
   return cpf.replace(/^(\d{3})\d{3}(\d{3})(\d{2})$/, "$1.***.***-$3");
 }
 
+// Estilos dos status
 const STATUS_STYLES: Record<
   string,
   { label: string; color: string; bg: string }
@@ -100,6 +96,7 @@ const STATUS_STYLES: Record<
   REPROVADO: { label: "Reprovado", color: "#dc2626", bg: "#fee2e2" },
 };
 
+// Estilos das ocorrências
 const OCCURRENCE_COLORS: Record<string, string> = {
   furto: "#ef4444",
   roubo: "#008000",
@@ -110,6 +107,7 @@ const OCCURRENCE_COLORS: Record<string, string> = {
 
 // ─── Export to Excel ──────────────────────────────────────────────────────────
 
+// Exporta as ocorrências para CSV
 function exportToCSV(occurrences: Occurrence[]) {
   const headers = ["Nome", "CPF", "RG", "Tipo", "Endereço", "Data"];
   const rows = occurrences.map((o) => [
@@ -140,6 +138,7 @@ function exportToCSV(occurrences: Occurrence[]) {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
+
 
 export default function Admin() {
   const navigate = useNavigate();
