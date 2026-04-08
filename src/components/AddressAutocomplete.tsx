@@ -31,10 +31,10 @@ export function AddressAutocomplete({
 
 			if (userLocation) {
 				const userBounds = {
-					north: userLocation.lat + 0.01,
-					south: userLocation.lat - 0.01,
-					east: userLocation.lng + 0.01,
-					west: userLocation.lng - 0.01,
+					north: userLocation.lat + 0.05,
+					south: userLocation.lat - 0.05,
+					east: userLocation.lng + 0.05,
+					west: userLocation.lng - 0.05,
 				};
 				options.bounds = userBounds;
 				options.strictBounds = false;
