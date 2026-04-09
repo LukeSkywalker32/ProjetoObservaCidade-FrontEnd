@@ -25,19 +25,19 @@ export function AddressAutocomplete({
 
 			const options: google.maps.places.AutocompleteOptions = {
 				componentRestrictions: { country: "br" },
-				types: ["address"],
+				types: ["address", "city"],
 				fields: ["address_components", "geometry", "name"],
 			};
 
 			if (userLocation) {
 				const userBounds = {
-					north: userLocation.lat + 0.05,
-					south: userLocation.lat - 0.05,
-					east: userLocation.lng + 0.05,
-					west: userLocation.lng - 0.05,
+					north: userLocation.lat + 0.5,
+					south: userLocation.lat - 0.5,
+					east: userLocation.lng + 0.5,
+					west: userLocation.lng - 0.5,
 				};
 				options.bounds = userBounds;
-				options.strictBounds = false;
+				options.strictBounds = true;
 			}
 
 			autocompleteRef.current = new window.google.maps.places.Autocomplete(
