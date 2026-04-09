@@ -1,10 +1,5 @@
 import { Geolocation } from "@capacitor/geolocation";
-import {
-	GoogleMap,
-	InfoWindow,
-	Marker,
-	useJsApiLoader,
-} from "@react-google-maps/api";
+import { GoogleMap, InfoWindow, Marker } from "@react-google-maps/api";
 import {
 	AlertTriangle,
 	Eye,
@@ -18,6 +13,7 @@ import {
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { OCCURRENCE_TYPES } from "../constants/occurrenceTypes";
+import { useGoogleMaps } from "../context/GoogleMapsContext";
 import { api } from "../services/api";
 import { formatRelativeTime } from "../utils/dateUtils";
 import { createMarkerIcon } from "../utils/getMarkerIcon";
@@ -37,11 +33,7 @@ export default function Map() {
 	const [showLogoutModal, setShowLogoutModal] = useState(false);
 	const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
 	const [loading, setLoading] = useState(true);
-	const { isLoaded } = useJsApiLoader({
-		googleMapsApiKey: import.meta.env.VITE_GOOGLEMAPS_API_KEY,
-		libraries: ["places"],
-		language: "pt-BR",
-	});
+	const { isLoaded } = useGoogleMaps();
 	// Check both location state and localStorage
 	const [isGuest, setIsGuest] = useState(() => {
 		const stored = localStorage.getItem("isGuest");
@@ -161,6 +153,7 @@ export default function Map() {
 						)}
 						<MapPin className="w-6 h-6 text-[#f59e0b]" />
 						<button
+							type="button"
 							onClick={() => setShowLogoutModal(true)}
 							className="flex items-center gap-2 text-white hover:text-[#f59e0b] transition-colors"
 						>
@@ -315,6 +308,7 @@ export default function Map() {
 			{/* Botão de Registrar Ocorrência - Só aparece se não estiver em modo de convidado */}
 			{!isGuest && (
 				<button
+					type="button"
 					onClick={() => navigate("/register")}
 					className="fixed bottom-24 right-6 w-16 h-16 bg-[#f59e0b] hover:bg-[#d97706] text-white rounded-full shadow-xl flex items-center justify-center transition-all duration-200 active:scale-95 z-10"
 				>
@@ -325,19 +319,26 @@ export default function Map() {
 			{/* Bottom Navigation */}
 			<div className="bg-white border-t border-[#e5e7eb] px-6 py-3 shadow-lg">
 				<div className="max-w-md mx-auto flex justify-around items-center">
-					<button className="flex flex-col items-center gap-1 text-[#2563eb]">
+					<button
+						type="button"
+						className="flex flex-col items-center gap-1 text-[#2563eb]"
+					>
 						<MapPin className="w-6 h-6" />
 						<span className="text-xs font-medium">Mapa</span>
 					</button>
 					{!isGuest && (
-						<button className="flex flex-col items-center gap-1 text-[#6b7280]">
-							<button onClick={() => navigate("/profile")}>
+						<button
+							type="button"
+							className="flex flex-col items-center gap-1 text-[#6b7280]"
+						>
+							<button type="button" onClick={() => navigate("/profile")}>
 								<User className="w-6 h-6" />
 								<span className="text-xs">Perfil</span>
 							</button>
 						</button>
 					)}
 					<button
+						type="button"
 						onClick={() => navigate("/help")}
 						className="flex flex-col items-center gap-1 text-[#6b7280]"
 					>
@@ -354,6 +355,7 @@ export default function Map() {
 						<div className="flex items-center justify-between mb-4">
 							<p className="text-lg font-bold text-[#1e3a8a]">Sair</p>
 							<button
+								type="button"
 								onClick={() => setShowLogoutModal(false)}
 								className="text-gray-500 hover:text-gray-700"
 							>
@@ -365,12 +367,14 @@ export default function Map() {
 						</p>
 						<div className="flex justify-end mt-4">
 							<button
+								type="button"
 								onClick={() => setShowLogoutModal(false)}
 								className="text-sm text-[#6b7280] hover:text-[#1e3a8a] mr-2"
 							>
 								Cancelar
 							</button>
 							<button
+								type="button"
 								onClick={handleLogout}
 								className="text-sm bg-[#f59e0b] hover:bg-[#d97706] text-white rounded-full px-3 py-1"
 							>

@@ -25,7 +25,7 @@ export function AddressAutocomplete({
 
 			const options: google.maps.places.AutocompleteOptions = {
 				componentRestrictions: { country: "br" },
-				types: ["address", "city"],
+				types: ["address"],
 				fields: ["address_components", "geometry", "name"],
 			};
 
@@ -53,7 +53,7 @@ export function AddressAutocomplete({
 						"route", //Rua
 						"street_number", //Número
 						"sublocality_level_1", //Bairro
-						"locality", //Cidade
+						"administrative_area_level_2", //Cidade - Municipio
 						"administrative_area_level_1", //Estado
 					];
 					const addressParts = place.address_components
