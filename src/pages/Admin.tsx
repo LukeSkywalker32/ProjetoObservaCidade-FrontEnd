@@ -1,27 +1,32 @@
-import { GoogleMap, InfoWindow, Marker } from "@react-google-maps/api";
+import type { LatLngExpression } from "leaflet";
 import {
-	AlertTriangle,
-	CheckCircle,
-	ClipboardList,
-	FileText,
-	LogOut,
-	MapPin,
-	Search,
-	Shield,
-	Trash2,
-	Users,
-	X,
-	XCircle,
+  AlertTriangle,
+  CheckCircle,
+  ClipboardList,
+  FileText,
+  LogOut,
+  MapPin,
+  Search,
+  Shield,
+  Trash2,
+  Users,
+  X,
+  XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
+import { RecenterMap } from "../components/Recentermap";
 import { OCCURRENCE_TYPES } from "../constants/occurrenceTypes";
 import { useAuth } from "../context/AuthContext";
-import { useGoogleMaps } from "../context/GoogleMapsContext";
 import { api } from "../services/api";
 import { formatRelativeTime } from "../utils/dateUtils";
 import { createMarkerIcon } from "../utils/getMarkerIcon";
+
+const GEOAPIFY_API_KEY = import.meta.env.VITE_GEOAPIFY_API_KEY;
+// ↑ mesma chave e mesmo tile usados em Map.tsx, para manter o visual
+// do mapa consistente entre o app público e o painel admin
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -164,16 +169,15 @@ export default function Admin() {
 	// Map state
 	const [mapOccurrences, setMapOccurrences] = useState<MapOccurrence[]>([]);
 	// ↑ lista separada de ocorrências para o mapa com lat/lng
-	const [selectedMapOccurrence, setSelectedMapOccurrence] =
-		useState<MapOccurrence | null>(null);
-	// ↑ ocorrência selecionada ao clicar no marker, abre o InfoWindow
+	// ↑ removido o estado selectedMapOccurrence: com react-leaflet o <Popup>
+	// como filho do <Marker> controla sua própria abertura/fechamento
 	const [userLocation, setUserLocation] = useState<{
 		lat: number;
 		lng: number;
 	} | null>(null);
-	const { isLoaded } = useGoogleMaps();
-	// ↑ hook que carrega a API do Google Maps usando a chave do .env
-	// isLoaded vira true quando a API termina de carregar e o mapa pode ser renderizado
+	// ↑ removido o hook useGoogleMaps / isLoaded — o Leaflet não depende
+	// de um script externo carregando de forma assíncrona, então não
+	// existe mais um estado de "carregando a API do mapa"
 
 	// ─── Fetch Users ────────────────────────────────────────────────────────────
 
@@ -603,27 +607,33 @@ export default function Admin() {
 					className="mt-4"
 				>
 					<div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-						{!isLoaded ? (
-							// exibe mensagem enquanto a API do Google Maps está carregando
-							<div className="h-[600px] flex items-center justify-center text-gray-400">
-								Carregando mapa...
-							</div>
-						) : (
-							<GoogleMap
-								mapContainerStyle={{ width: "100%", height: "600px" }}
-								// ↑ define as dimensões do mapa — altura maior que no app pois o painel admin tem mais espaço
-								center={userLocation || { lat: -23.5505, lng: -46.6333 }}
+						<div className="h-[600px]">
+							<MapContainer
+								center={
+									(userLocation || {
+										lat: -23.5505,
+										lng: -46.6333,
+									}) as LatLngExpression
+								}
 								// ↑ ↑ usa a localização real do usuário se disponível, caso contrario fallback são paulo
 								zoom={12}
 								// ↑ zoom um pouco menor que no app para dar uma visão mais ampla da cidade
-								options={{
-									mapTypeControl: false,
-									streetViewControl: false,
-									fullscreenControl: false,
-									zoomControl: true,
-								}}
-								// ↑ mesmas opções do Map.tsx — remove controles desnecessários
+								zoomControl={true}
+								style={{ width: "100%", height: "100%" }}
 							>
+								<TileLayer
+									url={`https://maps.geoapify.com/v1/tile/osm-bright/{z}/{x}/{y}.png?apiKey=${GEOAPIFY_API_KEY}`}
+									attribution='Powered by <a href="https://www.geoapify.com/" target="_blank">Geoapify</a> | © OpenStreetMap contributors'
+									maxZoom={20}
+								/>
+								<RecenterMap
+									center={
+										(userLocation || {
+											lat: -23.5505,
+											lng: -46.6333,
+										}) as LatLngExpression
+									}
+								/>
 								{mapOccurrences
 									.filter(
 										(occ) =>
@@ -632,14 +642,11 @@ export default function Admin() {
 											occ.latitude !== null &&
 											occ.longitude !== null,
 									)
-									// ↑ filtra ocorrências sem coordenadas para evitar erro no Google Maps
+									// ↑ filtra ocorrências sem coordenadas para evitar erro no mapa
 									.map((occ) => (
 										<Marker
 											key={occ._id}
-											position={{
-												lat: Number(occ.latitude),
-												lng: Number(occ.longitude),
-											}}
+											position={[Number(occ.latitude), Number(occ.longitude)]}
 											// ↑ posiciona o marker nas coordenadas da ocorrência
 											icon={createMarkerIcon(
 												OCCURRENCE_TYPES[
@@ -649,37 +656,30 @@ export default function Admin() {
 												]?.color || "#000000",
 											)}
 											// ↑ usa a cor do tipo da ocorrência para colorir o marker
-											onClick={() => setSelectedMapOccurrence(occ)}
-											// ↑ ao clicar no marker, guarda a ocorrência selecionada para abrir o InfoWindow
-										/>
+										>
+											{/*
+												Popup como filho do Marker: abre sozinho ao
+												clicar, fecha o anterior automaticamente ao
+												abrir outro. O estado selectedMapOccurrence
+												não precisa mais controlar abertura/fechamento
+												manualmente como fazia com o InfoWindow do Google.
+											*/}
+											<Popup>
+												<div style={{ maxWidth: "200px" }}>
+													<h3 style={{ fontWeight: "bold", marginBottom: "4px" }}>
+														{occ.type.toUpperCase()}
+													</h3>
+													<p style={{ fontSize: "14px" }}>{occ.description}</p>
+													<p style={{ fontSize: "12px", color: "#6b7280" }}>
+														{formatRelativeTime(occ.createdAt)}
+														{/* ↑ exibe "há 2 horas", "há 3 dias", etc — igual ao Map.tsx */}
+													</p>
+												</div>
+											</Popup>
+										</Marker>
 									))}
-
-								{selectedMapOccurrence && (
-									<InfoWindow
-										position={{
-											lat: selectedMapOccurrence.latitude,
-											lng: selectedMapOccurrence.longitude,
-										}}
-										// ↑ posiciona o InfoWindow nas coordenadas da ocorrência clicada
-										onCloseClick={() => setSelectedMapOccurrence(null)}
-										// ↑ ao fechar o InfoWindow, limpa o estado e fecha o balão
-									>
-										<div style={{ maxWidth: "200px" }}>
-											<h3 style={{ fontWeight: "bold", marginBottom: "4px" }}>
-												{selectedMapOccurrence.type.toUpperCase()}
-											</h3>
-											<p style={{ fontSize: "14px" }}>
-												{selectedMapOccurrence.description}
-											</p>
-											<p style={{ fontSize: "12px", color: "#6b7280" }}>
-												{formatRelativeTime(selectedMapOccurrence.createdAt)}
-												{/* ↑ exibe "há 2 horas", "há 3 dias", etc — igual ao Map.tsx */}
-											</p>
-										</div>
-									</InfoWindow>
-								)}
-							</GoogleMap>
-						)}
+							</MapContainer>
+						</div>
 					</div>
 				</div>
 			</main>

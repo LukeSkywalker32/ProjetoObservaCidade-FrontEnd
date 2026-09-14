@@ -1,5 +1,5 @@
 import { Geolocation } from "@capacitor/geolocation";
-import { GoogleMap, InfoWindow, Marker } from "@react-google-maps/api";
+import type { LatLngExpression } from "leaflet";
 import {
 	AlertTriangle,
 	Eye,
@@ -11,9 +11,10 @@ import {
 	X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
 import { useLocation, useNavigate } from "react-router";
+import { RecenterMap } from "../components/Recentermap";
 import { OCCURRENCE_TYPES } from "../constants/occurrenceTypes";
-import { useGoogleMaps } from "../context/GoogleMapsContext";
 import { api } from "../services/api";
 import { formatRelativeTime } from "../utils/dateUtils";
 import { createMarkerIcon } from "../utils/getMarkerIcon";
@@ -27,13 +28,16 @@ type Occurrence = {
 	createdAt: string;
 };
 
+const GEOAPIFY_API_KEY = import.meta.env.VITE_GEOAPIFY_API_KEY;
+// ↑ substitui a antiga VITE_GOOGLEMAPS_API_KEY — usada aqui só para pedir
+// os tiles (as "imagens" do mapa), não para geocoding
+
 export default function Map() {
 	const navigate = useNavigate();
 	const location = useLocation();
 	const [showLogoutModal, setShowLogoutModal] = useState(false);
 	const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
 	const [loading, setLoading] = useState(true);
-	const { isLoaded } = useGoogleMaps();
 	// Check both location state and localStorage
 	const [isGuest, setIsGuest] = useState(() => {
 		const stored = localStorage.getItem("isGuest");
@@ -43,8 +47,6 @@ export default function Map() {
 		lat: number;
 		lng: number;
 	} | null>(null);
-	const [selectedOccurrence, setSelectedOccurrence] =
-		useState<Occurrence | null>(null);
 	const [cityName, setCityName] = useState<string>("Buscando...");
 
 	// Buscar ocorrências no banco de dados
@@ -121,7 +123,7 @@ export default function Map() {
 	};
 
 	// centro do mapa usando a localização do usuário ou padão
-	const center =
+	const center: LatLngExpression =
 		userLocation || // 1° prioridade
 		(occurrences.length
 			? {
@@ -170,80 +172,73 @@ export default function Map() {
 					<div className="relative bg-white rounded-2xl shadow-lg overflow-hidden mb-4">
 						{/* Map Background */}
 						<div className="w-full h-[600px]">
-							{!isLoaded || loading ? (
-								<p>Carregando mapa...</p>
-							) : (
-								<GoogleMap
-									//key={occurrences.length}
-									mapContainerStyle={{ width: "100%", height: "100%" }}
-									center={center}
-									zoom={13}
-									options={{
-										mapTypeControl: false,
-										streetViewControl: false,
-										fullscreenControl: false,
-										zoomControl: true,
-										styles: [
-											{
-												featureType: "poi",
-												elementType: "labels",
-												stylers: [{ visibility: "off" }],
-											},
-										],
-									}}
-								>
-									{occurrences
-										.filter(
-											(occ) =>
-												occ.latitude !== undefined &&
-												occ.longitude !== undefined &&
-												occ.latitude !== null &&
-												occ.longitude !== null,
-										)
-										.map((occ) => (
-											<Marker
-												key={occ._id}
-												position={{
-													lat: Number(occ.latitude),
-													lng: Number(occ.longitude),
-												}}
-												icon={createMarkerIcon(
-													OCCURRENCE_TYPES[
-														occ.type
-															.toLowerCase()
-															.trim() as keyof typeof OCCURRENCE_TYPES
-													]?.color || "#000000",
-												)}
-												onClick={() => setSelectedOccurrence(occ)}
-											/>
-										))}
-									{selectedOccurrence && (
-										<InfoWindow
-											position={{
-												lat: selectedOccurrence.latitude,
-												lng: selectedOccurrence.longitude,
-											}}
-											onCloseClick={() => setSelectedOccurrence(null)}
+							<MapContainer
+								center={center}
+								zoom={13}
+								zoomControl={true}
+								style={{ width: "100%", height: "100%" }}
+							>
+								{/*
+									Tiles do Geoapify no estilo "osm-bright": escolhido porque,
+									assim como o styles[] do Google que a gente tinha antes,
+									ele já vem com os rótulos de POI mais "limpos" (menos
+									poluição visual) do que o tile padrão do OpenStreetMap.
+									Isso consome a MESMA cota de requisições da sua API key
+									do Geoapify usada no geocoding — vale acompanhar o uso
+									se o tráfego crescer.
+								*/}
+								<TileLayer
+									url={`https://maps.geoapify.com/v1/tile/osm-bright/{z}/{x}/{y}.png?apiKey=${GEOAPIFY_API_KEY}`}
+									attribution='Powered by <a href="https://www.geoapify.com/" target="_blank">Geoapify</a> | © OpenStreetMap contributors'
+									maxZoom={20}
+								/>
+								<RecenterMap center={center} />
+								{occurrences
+									.filter(
+										(occ) =>
+											occ.latitude !== undefined &&
+											occ.longitude !== undefined &&
+											occ.latitude !== null &&
+											occ.longitude !== null,
+									)
+									.map((occ) => (
+										<Marker
+											key={occ._id}
+											position={[Number(occ.latitude), Number(occ.longitude)]}
+											icon={createMarkerIcon(
+												OCCURRENCE_TYPES[
+													occ.type
+														.toLowerCase()
+														.trim() as keyof typeof OCCURRENCE_TYPES
+												]?.color || "#000000",
+											)}
 										>
-											<div style={{ maxWidth: "200px" }}>
-												<h3 style={{ fontWeight: "bold", marginBottom: "4px" }}>
-													{selectedOccurrence.type.toUpperCase()}
-												</h3>
-												<p style={{ fontSize: "14px" }}>
-													{selectedOccurrence.description}
-												</p>
-												<p style={{ fontSize: "12px", color: "#6b7280" }}>
-													{formatRelativeTime(selectedOccurrence.createdAt)}
-												</p>
-											</div>
-										</InfoWindow>
-									)}
-								</GoogleMap>
-							)}
+											{/*
+												No Google a gente controlava o InfoWindow na mão
+												(estado selectedOccurrence + onClick). No Leaflet,
+												o <Popup> como filho do <Marker> já abre sozinho
+												ao clicar no marker, e o Leaflet fecha o popup
+												anterior automaticamente ao abrir outro — então
+												esse estado manual não é mais necessário.
+											*/}
+											<Popup>
+												<div style={{ maxWidth: "200px" }}>
+													<h3 style={{ fontWeight: "bold", marginBottom: "4px" }}>
+														{occ.type.toUpperCase()}
+													</h3>
+													<p style={{ fontSize: "14px" }}>{occ.description}</p>
+													<p style={{ fontSize: "12px", color: "#6b7280" }}>
+														{formatRelativeTime(occ.createdAt)}
+													</p>
+												</div>
+											</Popup>
+										</Marker>
+									))}
+							</MapContainer>
 						</div>
 
 						{/* Map Info Overlay */}
-						<div className="absolute top-4 left-4 right-4">
+						<div className="absolute top-4 left-4 right-4 z-[1000]">
 							<div className="bg-white/95 backdrop-blur-sm rounded-xl p-3 shadow-md">
 								<p className="text-xs text-[#6b7280] mb-2">Legenda:</p>
 								<div className="flex flex-wrap gap-3">
