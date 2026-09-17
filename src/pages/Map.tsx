@@ -1,14 +1,14 @@
 import { Geolocation } from "@capacitor/geolocation";
 import type { LatLngExpression } from "leaflet";
 import {
-	AlertTriangle,
-	Eye,
-	HelpCircle,
-	LogOut,
-	MapPin,
-	Plus,
-	User,
-	X,
+  AlertTriangle,
+  Eye,
+  HelpCircle,
+  LogOut,
+  MapPin,
+  Plus,
+  User,
+  X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
@@ -28,7 +28,7 @@ type Occurrence = {
 	createdAt: string;
 };
 
-const GEOAPIFY_API_KEY = import.meta.env.VITE_GEOAPIFY_API_KEY;
+//const GEOAPIFY_API_KEY = import.meta.env.VITE_GEOAPIFY_API_KEY;
 // ↑ substitui a antiga VITE_GOOGLEMAPS_API_KEY — usada aqui só para pedir
 // os tiles (as "imagens" do mapa), não para geocoding
 
@@ -188,9 +188,9 @@ export default function Map() {
 									se o tráfego crescer.
 								*/}
 								<TileLayer
-									url={`https://maps.geoapify.com/v1/tile/osm-bright/{z}/{x}/{y}.png?apiKey=${GEOAPIFY_API_KEY}`}
-									attribution='Powered by <a href="https://www.geoapify.com/" target="_blank">Geoapify</a> | © OpenStreetMap contributors'
-									maxZoom={20}
+									url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+									attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+									maxZoom={19}
 								/>
 								<RecenterMap center={center} />
 								{occurrences
