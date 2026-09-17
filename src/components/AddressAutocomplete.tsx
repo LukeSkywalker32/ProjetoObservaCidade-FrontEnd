@@ -53,7 +53,8 @@ export function AddressAutocomplete({
         };
 
         if (userLocation) {
-          params.bias = `proximity:${userLocation.lng},${userLocation.lat}`;
+          params.lat = String(userLocation.lat);
+          params.lng = String(userLocation.lng);
         }
 
         const response = await api.get("/geocode/autocomplete", { params });
