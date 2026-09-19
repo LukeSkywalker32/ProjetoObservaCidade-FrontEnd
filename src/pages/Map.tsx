@@ -353,7 +353,7 @@ export default function Map() {
 
 			{/* Logout Modal */}
 			{showLogoutModal && (
-				<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-1000">
+				<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[1000]">
 					<div className="bg-white rounded-lg shadow-lg p-6 w-80">
 						<div className="flex items-center justify-between mb-4">
 							<p className="text-lg font-bold text-[#1e3a8a]">Sair</p>
