@@ -46,12 +46,15 @@ export function useOccurrences<T extends OccurrenceBase = OccurrenceBase>({
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
+  const pageRef = useRef(page);
+  pageRef.current = page;
+
+  // A função real que faz o fetch (muda só quando endpoint/limit mudam)
   const fetchPage = useCallback(
     async (pageNum: number) => {
       setLoading(true);
       setError(null);
       try {
-        // Monta params limpando undefined
         const params: Record<string, string | number> = {
           page: pageNum,
           limit,
@@ -66,7 +69,6 @@ export function useOccurrences<T extends OccurrenceBase = OccurrenceBase>({
         const response = await api.get(endpoint, { params });
         const data = response.data;
 
-        // Detecta formato: paginado (objeto) ou legado (array)
         if (Array.isArray(data)) {
           setOccurrences(data as T[]);
           setTotal(data.length);
@@ -92,12 +94,44 @@ export function useOccurrences<T extends OccurrenceBase = OccurrenceBase>({
     [endpoint, limit],
   );
 
+  // Ref da fetchPage atual — usado pelas funções estáveis abaixo
+  const fetchPageRef = useRef(fetchPage);
+  fetchPageRef.current = fetchPage;
+
+  // ============================================
+  // Funções ESTÁVEIS — não mudam de referência.
+  // Use estas em arrays de deps de useEffect.
+  // ============================================
+  const stableFetch = useCallback((pageNum: number) => {
+    return fetchPageRef.current(pageNum);
+  }, []);
+
+  const stableNextPage = useCallback(() => {
+    if (pageRef.current < totalPages) {
+      return fetchPageRef.current(pageRef.current + 1);
+    }
+    return Promise.resolve();
+  }, [totalPages]);
+
+  const stablePrevPage = useCallback(() => {
+    if (pageRef.current > 1) {
+      return fetchPageRef.current(pageRef.current - 1);
+    }
+    return Promise.resolve();
+  }, []);
+
+  const stableRefresh = useCallback(() => {
+    return fetchPageRef.current(pageRef.current);
+  }, []);
+
   // Fetch automático no mount (a menos que `manual`)
+  // Depende só de endpoint/limit/manual — não muda com loading/error
   useEffect(() => {
     if (!manual) {
       fetchPage(1);
     }
-  }, [fetchPage, manual]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endpoint, limit, manual]);
 
   return {
     occurrences,
@@ -109,13 +143,10 @@ export function useOccurrences<T extends OccurrenceBase = OccurrenceBase>({
     error,
     hasNext: page < totalPages,
     hasPrev: page > 1,
-    nextPage: () => {
-      if (page < totalPages) fetchPage(page + 1);
-    },
-    prevPage: () => {
-      if (page > 1) fetchPage(page - 1);
-    },
-    goToPage: fetchPage,
-    refresh: () => fetchPage(page),
+    fetch: stableFetch,
+    nextPage: stableNextPage,
+    prevPage: stablePrevPage,
+    goToPage: stableFetch,
+    refresh: stableRefresh,
   };
 }

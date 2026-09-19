@@ -313,7 +313,7 @@ export default function Map() {
 				<button
 					type="button"
 					onClick={() => navigate("/register")}
-					className="fixed bottom-24 right-6 w-16 h-16 bg-[#f59e0b] hover:bg-[#d97706] text-white rounded-full shadow-xl flex items-center justify-center transition-all duration-200 active:scale-95 z-10"
+					className="fixed bottom-24 right-6 w-16 h-16 bg-[#f59e0b] hover:bg-[#d97706] text-white rounded-full shadow-xl flex items-center justify-center transition-all duration-200 active:scale-95 z-[500]"
 				>
 					<Plus className="w-8 h-8" />
 				</button>
@@ -353,7 +353,7 @@ export default function Map() {
 
 			{/* Logout Modal */}
 			{showLogoutModal && (
-				<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+				<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-1000">
 					<div className="bg-white rounded-lg shadow-lg p-6 w-80">
 						<div className="flex items-center justify-between mb-4">
 							<p className="text-lg font-bold text-[#1e3a8a]">Sair</p>
