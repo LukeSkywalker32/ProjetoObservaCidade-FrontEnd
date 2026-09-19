@@ -1,4 +1,3 @@
-import { Geolocation } from "@capacitor/geolocation";
 import type { LatLngExpression } from "leaflet";
 import {
   AlertTriangle,
@@ -15,30 +14,21 @@ import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
 import { useLocation, useNavigate } from "react-router";
 import { RecenterMap } from "../components/Recentermap";
 import { OCCURRENCE_TYPES } from "../constants/occurrenceTypes";
+import { OccurrenceBase, useOccurrences } from "../hooks/useOccurrences";
 import { api } from "../services/api";
 import { formatRelativeTime } from "../utils/dateUtils";
 import { createMarkerIcon } from "../utils/getMarkerIcon";
 
-type Occurrence = {
-	_id: string;
-	type: string;
+type Occurrence = OccurrenceBase & {
+	description: string;
 	latitude: number;
 	longitude: number;
-	description: string;
-	createdAt: string;
 };
-
-//const GEOAPIFY_API_KEY = import.meta.env.VITE_GEOAPIFY_API_KEY;
-// ↑ substitui a antiga VITE_GOOGLEMAPS_API_KEY — usada aqui só para pedir
-// os tiles (as "imagens" do mapa), não para geocoding
 
 export default function Map() {
 	const navigate = useNavigate();
 	const location = useLocation();
 	const [showLogoutModal, setShowLogoutModal] = useState(false);
-	const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
-	const [loading, setLoading] = useState(true);
-	// Check both location state and localStorage
 	const [isGuest, setIsGuest] = useState(() => {
 		const stored = localStorage.getItem("isGuest");
 		return stored === "true" || location.state?.isGuest || false;
@@ -49,21 +39,17 @@ export default function Map() {
 	} | null>(null);
 	const [cityName, setCityName] = useState<string>("Buscando...");
 
-	// Buscar ocorrências no banco de dados
-	useEffect(() => {
-		const fetchOccurrences = async () => {
-			setLoading(true);
-			try {
-				const response = await api.get("/public/occurrences");
-				setOccurrences(response.data);
-			} catch (error: any) {
-				console.error("Erro ao carregar ocorrências:", error);
-			} finally {
-				setLoading(false);
-			}
-		};
-		fetchOccurrences();
-	}, []);
+	// Hook unificado — substitui o useEffect + useState antigos
+	const {
+		occurrences,
+		loading,
+		hasNext,
+		nextPage,
+		total,
+	} = useOccurrences<Occurrence>({
+		endpoint: "/public/occurrences",
+		limit: 100, // mapa mostra mais
+	});
 
 	// Atualiza o estado de isGuest quando location state muda
 	useEffect(() => {
@@ -72,19 +58,40 @@ export default function Map() {
 		setIsGuest(newIsGuest);
 	}, [location.state]);
 
-	// Buscar localização do usuário
+	// Buscar localização do usuário (web e nativo)
 	useEffect(() => {
 		const getLocation = async () => {
 			try {
-				const permission = await Geolocation.requestPermissions();
+				// Detecta plataforma — Capacitor funciona só no Android/iOS
+				const isNative =
+					typeof window !== "undefined" &&
+					// @ts-expect-error - Capacitor injeta essa var global no native
+					(window.Capacitor?.isNativePlatform?.() ?? false);
 
-				if (permission.location === "granted") {
-					const position = await Geolocation.getCurrentPosition();
-
-					setUserLocation({
-						lat: position.coords.latitude,
-						lng: position.coords.longitude,
-					});
+				if (isNative) {
+					const { Geolocation } = await import("@capacitor/geolocation");
+					const permission = await Geolocation.requestPermissions();
+					if (permission.location === "granted") {
+						const position = await Geolocation.getCurrentPosition();
+						setUserLocation({
+							lat: position.coords.latitude,
+							lng: position.coords.longitude,
+						});
+					}
+				} else if (navigator.geolocation) {
+					// Web — usa API nativa do navegador
+					navigator.geolocation.getCurrentPosition(
+						(position) => {
+							setUserLocation({
+								lat: position.coords.latitude,
+								lng: position.coords.longitude,
+							});
+						},
+						(error) => {
+							console.warn("Geolocation não disponível:", error.message);
+						},
+						{ timeout: 10000 },
+					);
 				}
 			} catch (error) {
 				console.error("Erro ao obter localização:", error);
@@ -106,12 +113,12 @@ export default function Map() {
 					});
 					setCityName(response.data.city);
 				} catch (error) {
-					setCityName(""); //Silencia o erro
+					setCityName("");
 				}
 			};
 			fetchCity();
 		} else {
-			setCityName(""); //Se for convidado e não tiver localização, deixa vazio
+			setCityName("");
 		}
 	}, [userLocation, isGuest]);
 
@@ -122,20 +129,15 @@ export default function Map() {
 		navigate("/login");
 	};
 
-	// centro do mapa usando a localização do usuário ou padão
+	// Centro do mapa — localização do usuário > primeira ocorrência > SP
 	const center: LatLngExpression =
-		userLocation || // 1° prioridade
+		userLocation ||
 		(occurrences.length
 			? {
 					lat: occurrences[0].latitude,
 					lng: occurrences[0].longitude,
 				}
-			: { lat: -23.5505, lng: -46.6333 }); // Default location: São Paulo
-
-	if (loading)
-		return (
-			<div className="p-8 text-center">Carregando mapa e ocorrências...</div>
-		);
+			: { lat: -23.5505, lng: -46.6333 });
 
 	return (
 		<div className="min-h-screen bg-[#f3f4f6] flex flex-col">
@@ -147,7 +149,6 @@ export default function Map() {
 						<h1 className="text-xl font-bold text-white">ObservaCidade</h1>
 					</div>
 					<div className="flex items-center gap-3">
-						{/** NOME DA CIDADE A ESQUERDA DO MAP PIN */}
 						{!isGuest && cityName && (
 							<span className="text-white text-sm font-medium bg-black/20 px-3 py-1 rounded-full">
 								{cityName}
@@ -168,9 +169,7 @@ export default function Map() {
 			{/* Map Container */}
 			<div className="flex-1 p-4">
 				<div className="max-w-3xl mx-auto">
-					{/* Map */}
 					<div className="relative bg-white rounded-2xl shadow-lg overflow-hidden mb-4">
-						{/* Map Background */}
 						<div className="w-full h-[600px]">
 							<MapContainer
 								center={center}
@@ -178,15 +177,6 @@ export default function Map() {
 								zoomControl={true}
 								style={{ width: "100%", height: "100%" }}
 							>
-								{/*
-									Tiles do Geoapify no estilo "osm-bright": escolhido porque,
-									assim como o styles[] do Google que a gente tinha antes,
-									ele já vem com os rótulos de POI mais "limpos" (menos
-									poluição visual) do que o tile padrão do OpenStreetMap.
-									Isso consome a MESMA cota de requisições da sua API key
-									do Geoapify usada no geocoding — vale acompanhar o uso
-									se o tráfego crescer.
-								*/}
 								<TileLayer
 									url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 									attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -207,20 +197,10 @@ export default function Map() {
 											position={[Number(occ.latitude), Number(occ.longitude)]}
 											icon={createMarkerIcon(
 												OCCURRENCE_TYPES[
-													occ.type
-														.toLowerCase()
-														.trim() as keyof typeof OCCURRENCE_TYPES
+													occ.type.toLowerCase().trim() as keyof typeof OCCURRENCE_TYPES
 												]?.color || "#000000",
 											)}
 										>
-											{/*
-												No Google a gente controlava o InfoWindow na mão
-												(estado selectedOccurrence + onClick). No Leaflet,
-												o <Popup> como filho do <Marker> já abre sozinho
-												ao clicar no marker, e o Leaflet fecha o popup
-												anterior automaticamente ao abrir outro — então
-												esse estado manual não é mais necessário.
-											*/}
 											<Popup>
 												<div style={{ maxWidth: "200px" }}>
 													<h3 style={{ fontWeight: "bold", marginBottom: "4px" }}>
@@ -237,10 +217,17 @@ export default function Map() {
 							</MapContainer>
 						</div>
 
-						{/* Map Info Overlay */}
+						{/* Legenda + contador */}
 						<div className="absolute top-4 left-4 right-4 z-[1000]">
 							<div className="bg-white/95 backdrop-blur-sm rounded-xl p-3 shadow-md">
-								<p className="text-xs text-[#6b7280] mb-2">Legenda:</p>
+								<div className="flex items-center justify-between mb-2">
+									<p className="text-xs text-[#6b7280]">Legenda:</p>
+									{total > 0 && (
+										<p className="text-xs text-[#6b7280]">
+											{occurrences.length}/{total} ocorrências
+										</p>
+									)}
+								</div>
 								<div className="flex flex-wrap gap-3">
 									<div className="flex items-center gap-2">
 										<div className="w-3 h-3 rounded-full bg-[#ef4444]"></div>
@@ -265,7 +252,28 @@ export default function Map() {
 								</div>
 							</div>
 						</div>
+
+						{/* Loading overlay */}
+						{loading && occurrences.length === 0 && (
+							<div className="absolute inset-0 bg-white/80 flex items-center justify-center z-[1001]">
+								<p className="text-gray-500">Carregando mapa e ocorrências...</p>
+							</div>
+						)}
 					</div>
+
+					{/* Botão "Ver mais" — carrega próxima página */}
+					{hasNext && (
+						<div className="flex justify-center mb-4">
+							<button
+								type="button"
+								onClick={nextPage}
+								disabled={loading}
+								className="bg-white border border-gray-200 text-[#1e3a8a] font-semibold py-2 px-6 rounded-xl hover:bg-gray-50 transition-colors disabled:opacity-50"
+							>
+								{loading ? "Carregando..." : "Ver mais ocorrências"}
+							</button>
+						</div>
+					)}
 
 					{/* Info Banner */}
 					<div className="bg-[#eff6ff] border border-[#bfdbfe] rounded-xl p-4 mb-4">
@@ -300,7 +308,7 @@ export default function Map() {
 				</div>
 			</div>
 
-			{/* Botão de Registrar Ocorrência - Só aparece se não estiver em modo de convidado */}
+			{/* Botão flutuante de Registrar Ocorrência */}
 			{!isGuest && (
 				<button
 					type="button"

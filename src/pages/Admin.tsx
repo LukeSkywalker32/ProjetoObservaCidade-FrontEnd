@@ -20,19 +20,19 @@ import { toast } from "react-toastify";
 import { RecenterMap } from "../components/Recentermap";
 import { OCCURRENCE_TYPES } from "../constants/occurrenceTypes";
 import { useAuth } from "../context/AuthContext";
+import {
+  OccurrenceBase,
+  useOccurrences,
+} from "../hooks/useOccurrences";
 import { api } from "../services/api";
 import { formatRelativeTime } from "../utils/dateUtils";
 import { createMarkerIcon } from "../utils/getMarkerIcon";
-
-const GEOAPIFY_API_KEY = import.meta.env.VITE_GEOAPIFY_API_KEY;
-// ↑ mesma chave e mesmo tile usados em Map.tsx, para manter o visual
-// do mapa consistente entre o app público e o painel admin
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type DocumentStatus = "PENDENTE" | "APROVADO" | "REPROVADO" | "";
 
-type User = {
+type AdminUser = {
 	_id: string;
 	fullName: string;
 	email: string;
@@ -43,12 +43,9 @@ type User = {
 	createdAt: string;
 };
 
-type Occurrence = {
-	_id: string;
-	type: string;
+type AuditOccurrence = OccurrenceBase & {
 	description: string;
 	address: string;
-	createdAt: string;
 	userId: {
 		fullName: string;
 		email: string;
@@ -57,20 +54,14 @@ type Occurrence = {
 	};
 };
 
-// tipo separado para as ocorrências do mapa pois precisam de latitude e longitude
-// as ocorrências da aba de auditoria não precisam dessas coordenadas
-type MapOccurrence = {
-	_id: string;
-	type: string;
+type MapOccurrence = OccurrenceBase & {
 	description: string;
 	latitude: number;
 	longitude: number;
-	createdAt: string;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Formata a data para o formato brasileiro
 function formatDate(date: string) {
 	return new Date(date).toLocaleString("pt-BR", {
 		day: "2-digit",
@@ -81,13 +72,11 @@ function formatDate(date: string) {
 	});
 }
 
-// Mascara o CPF
 function maskCPF(cpf: string) {
 	if (!cpf) return "---";
 	return cpf.replace(/^(\d{3})\d{3}(\d{3})(\d{2})$/, "$1.***.***-$3");
 }
 
-// Estilos dos status
 const STATUS_STYLES: Record<
 	string,
 	{ label: string; color: string; bg: string }
@@ -97,7 +86,6 @@ const STATUS_STYLES: Record<
 	REPROVADO: { label: "Reprovado", color: "#dc2626", bg: "#fee2e2" },
 };
 
-// Estilos das ocorrências
 const OCCURRENCE_COLORS: Record<string, string> = {
 	furto: "#ef4444",
 	roubo: "#008000",
@@ -106,18 +94,14 @@ const OCCURRENCE_COLORS: Record<string, string> = {
 	outros: "#6b7280",
 };
 
-// ─── Export to Excel ──────────────────────────────────────────────────────────
+// ─── Export to CSV ──────────────────────────────────────────────────────────
 
-// Exporta as ocorrências para CSV
-function exportToCSV(occurrences: Occurrence[]) {
+function exportToCSV(occurrences: AuditOccurrence[]) {
 	const headers = ["Nome", "CPF", "RG", "Tipo", "Endereço", "Data"];
 	const rows = occurrences.map((o) => [
 		o.userId?.fullName || "—",
 		o.userId?.cpf ? `="${o.userId.cpf}"` : "—",
-		// ← prefixo ="" força o Excel a tratar como texto, exibindo todos os dígitos sem máscara
-		// sem isso o Excel interpreta CPF como número e remove os zeros à esquerda
 		o.userId?.rg ? `="${o.userId.rg}"` : "—",
-		// ← mesma lógica para o RG
 		o.type,
 		o.address,
 		formatDate(o.createdAt),
@@ -146,49 +130,70 @@ export default function Admin() {
 	const [activeTab, setActiveTab] = useState<"users" | "occurrences" | "map">(
 		"users",
 	);
-	// ↑ adicionado "map" como opção válida para a aba ativa
 
-	// Users state
-	const [users, setUsers] = useState<User[]>([]);
+	// Users — fetch com filtros via state local (controla refetch)
+	const [users, setUsers] = useState<AdminUser[]>([]);
 	const [loadingUsers, setLoadingUsers] = useState(false);
 	const [statusFilter, setStatusFilter] = useState<DocumentStatus>("");
 	const [search, setSearch] = useState("");
+	const [usersTotal, setUsersTotal] = useState(0);
+	const [usersPage, setUsersPage] = useState(1);
+	const [usersTotalPages, setUsersTotalPages] = useState(1);
+
+	// Hook de ocorrências (auditoria) — manual, fetch on demand
+	const {
+		occurrences,
+		loading: loadingOccurrences,
+		refresh: refreshOccurrences,
+	} = useOccurrences<AuditOccurrence>({
+		endpoint: "/admin/occurrences",
+		limit: 50,
+		manual: true,
+	});
+
+	// Hook de ocorrências do mapa (com lat/lng)
+	const {
+		occurrences: mapOccurrences,
+		loading: loadingMap,
+		fetch: fetchMapOccurrences,
+	} = useOccurrences<MapOccurrence>({
+		endpoint: "/public/occurrences",
+		limit: 200, // mapa mostra mais
+		manual: true,
+	});
+
 	// Document modal
-	const [selectedUser, setSelectedUser] = useState<User | null>(null);
+	const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
 	const [showDocModal, setShowDocModal] = useState(false);
 	const [actionLoading, setActionLoading] = useState(false);
+
 	// Delete user modal
-	const [userToDelete, setUserToDelete] = useState<User | null>(null);
-	// Occurrences state
-	const [occurrences, setOccurrences] = useState<Occurrence[]>([]);
-	const [loadingOccurrences, setLoadingOccurrences] = useState(false);
+	const [userToDelete, setUserToDelete] = useState<AdminUser | null>(null);
+
 	// Delete occurrence modal
 	const [occurrenceToDelete, setOccurrenceToDelete] =
-		useState<Occurrence | null>(null);
+		useState<AuditOccurrence | null>(null);
 	const [deleteReason, setDeleteReason] = useState("");
+
 	// Map state
-	const [mapOccurrences, setMapOccurrences] = useState<MapOccurrence[]>([]);
-	// ↑ lista separada de ocorrências para o mapa com lat/lng
-	// ↑ removido o estado selectedMapOccurrence: com react-leaflet o <Popup>
-	// como filho do <Marker> controla sua própria abertura/fechamento
 	const [userLocation, setUserLocation] = useState<{
 		lat: number;
 		lng: number;
 	} | null>(null);
-	// ↑ removido o hook useGoogleMaps / isLoaded — o Leaflet não depende
-	// de um script externo carregando de forma assíncrona, então não
-	// existe mais um estado de "carregando a API do mapa"
 
 	// ─── Fetch Users ────────────────────────────────────────────────────────────
 
-	const fetchUsers = async () => {
+	const fetchUsers = async (page = 1) => {
 		setLoadingUsers(true);
 		try {
-			const params: any = { limit: 50 };
+			const params: Record<string, string | number> = { page, limit: 50 };
 			if (statusFilter) params.status = statusFilter;
 			if (search) params.search = search;
 			const response = await api.get("/admin/users", { params });
 			setUsers(response.data.users);
+			setUsersTotal(response.data.totalUsers);
+			setUsersTotalPages(response.data.totalPages);
+			setUsersPage(page);
 		} catch {
 			toast.error("Erro ao buscar usuários");
 		} finally {
@@ -196,55 +201,31 @@ export default function Admin() {
 		}
 	};
 
-	// ─── Fetch Occurrences ──────────────────────────────────────────────────────
-
-	const fetchOccurrences = async () => {
-		setLoadingOccurrences(true);
-		try {
-			const response = await api.get("/admin/occurrences");
-			setOccurrences(response.data);
-		} catch {
-			toast.error("Erro ao buscar ocorrências");
-		} finally {
-			setLoadingOccurrences(false);
-		}
-	};
-
 	useEffect(() => {
-		fetchUsers();
+		fetchUsers(1);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [statusFilter]);
 
-	useEffect(() => {
-		if (activeTab === "occurrences" && occurrences.length === 0) {
-			fetchOccurrences();
-		}
-	}, [activeTab]);
-
-	// busca as ocorrências para o mapa usando a rota pública
-	// usamos a rota pública pois ela já retorna latitude e longitude
-	// e só buscamos quando a aba de mapa é aberta pela primeira vez
-	const fetchMapOccurrences = async () => {
-		try {
-			const response = await api.get("/public/occurrences");
-			setMapOccurrences(response.data);
-			// ↑ armazena as ocorrências com lat/lng no estado separado do mapa
-		} catch {
-			toast.error("Erro ao carregar ocorrências do mapa");
-		}
-	};
+	// ─── Fetch Occurrences (auditoria) ──────────────────────────────────────────
 
 	useEffect(() => {
-		if (activeTab === "map" && mapOccurrences.length === 0) {
-			fetchMapOccurrences();
-			// ↑ só busca quando a aba mapa é ativada e ainda não tem dados carregados
-			// evita requisições desnecessárias ao trocar entre abas
+		if (activeTab === "occurrences") {
+			refreshOccurrences();
 		}
-	}, [activeTab]);
+	}, [activeTab, refreshOccurrences]);
 
-	//Verifica se o navegador suporta geolocalização
+	// ─── Fetch Map Occurrences ──────────────────────────────────────────────────
+
+	useEffect(() => {
+		if (activeTab === "map") {
+			fetchMapOccurrences(1);
+		}
+	}, [activeTab, fetchMapOccurrences]);
+
+	// ─── Geolocation ───────────────────────────────────────────────────────────
+
 	useEffect(() => {
 		if (!navigator.geolocation) return;
-		//Salva as coords reais do usuario
 		navigator.geolocation.getCurrentPosition(
 			(position) => {
 				setUserLocation({
@@ -267,7 +248,7 @@ export default function Admin() {
 			await api.patch(`/admin/users/${selectedUser._id}/approve`);
 			toast.success("Documento aprovado!");
 			setShowDocModal(false);
-			fetchUsers();
+			fetchUsers(usersPage);
 		} catch {
 			toast.error("Erro ao aprovar documento");
 		} finally {
@@ -284,7 +265,7 @@ export default function Admin() {
 			});
 			toast.success("Documento reprovado!");
 			setShowDocModal(false);
-			fetchUsers();
+			fetchUsers(usersPage);
 		} catch {
 			toast.error("Erro ao reprovar documento");
 		} finally {
@@ -298,7 +279,7 @@ export default function Admin() {
 			await api.delete(`/admin/users/${userToDelete._id}`);
 			toast.success("Usuário excluído!");
 			setUserToDelete(null);
-			fetchUsers();
+			fetchUsers(usersPage);
 		} catch {
 			toast.error("Erro ao excluir usuário");
 		}
@@ -315,7 +296,7 @@ export default function Admin() {
 			toast.success("Ocorrência excluída!");
 			setOccurrenceToDelete(null);
 			setDeleteReason("");
-			fetchOccurrences();
+			refreshOccurrences();
 		} catch {
 			toast.error("Erro ao excluir ocorrência");
 		}
@@ -374,7 +355,6 @@ export default function Admin() {
 						<ClipboardList className="w-4 h-4" />
 						Ocorrências
 					</button>
-					{/**Botão de mapa */}
 					<button
 						type="button"
 						onClick={() => setActiveTab("map")}
@@ -395,7 +375,6 @@ export default function Admin() {
 				{/* ── USERS TAB ── */}
 				{activeTab === "users" && (
 					<div className="space-y-4 mt-4">
-						{/* Filters */}
 						<div className="bg-white rounded-2xl shadow-sm p-4 flex flex-col sm:flex-row gap-3">
 							<div className="relative flex-1">
 								<Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -404,7 +383,7 @@ export default function Admin() {
 									placeholder="Buscar por nome ou e-mail..."
 									value={search}
 									onChange={(e) => setSearch(e.target.value)}
-									onKeyDown={(e) => e.key === "Enter" && fetchUsers()}
+									onKeyDown={(e) => e.key === "Enter" && fetchUsers(1)}
 									className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-[#2563eb]"
 								/>
 							</div>
@@ -421,15 +400,22 @@ export default function Admin() {
 								<option value="REPROVADO">Reprovados</option>
 							</select>
 							<button
-                     type="button"
-								onClick={fetchUsers}
+								type="button"
+								onClick={() => fetchUsers(1)}
 								className="bg-[#1e3a8a] text-white px-5 py-2 rounded-xl text-sm font-semibold hover:bg-[#1e40af] transition-colors"
 							>
 								Buscar
 							</button>
 						</div>
 
-						{/* Users List */}
+						{/* Contador */}
+						{usersTotal > 0 && (
+							<p className="text-xs text-gray-500 px-2">
+								Página {usersPage} de {usersTotalPages} ({usersTotal}{" "}
+								usuários)
+							</p>
+						)}
+
 						{loadingUsers ? (
 							<div className="text-center py-12 text-gray-400">
 								Carregando...
@@ -513,6 +499,28 @@ export default function Admin() {
 										</div>
 									);
 								})}
+
+								{/* Paginação de usuários */}
+								{usersTotalPages > 1 && (
+									<div className="flex justify-center gap-2 pt-2">
+										<button
+											type="button"
+											disabled={usersPage === 1}
+											onClick={() => fetchUsers(usersPage - 1)}
+											className="bg-white border border-gray-200 text-[#1e3a8a] font-semibold py-2 px-4 rounded-xl hover:bg-gray-50 transition-colors disabled:opacity-40"
+										>
+											← Anterior
+										</button>
+										<button
+											type="button"
+											disabled={usersPage === usersTotalPages}
+											onClick={() => fetchUsers(usersPage + 1)}
+											className="bg-white border border-gray-200 text-[#1e3a8a] font-semibold py-2 px-4 rounded-xl hover:bg-gray-50 transition-colors disabled:opacity-40"
+										>
+											Próxima →
+										</button>
+									</div>
+								)}
 							</div>
 						)}
 					</div>
@@ -521,11 +529,15 @@ export default function Admin() {
 				{/* ── OCCURRENCES TAB ── */}
 				{activeTab === "occurrences" && (
 					<div className="space-y-4 mt-4">
-						<div className="flex justify-end">
+						<div className="flex justify-between items-center">
+							<p className="text-xs text-gray-500">
+								{occurrences.length} ocorrências carregadas
+							</p>
 							<button
 								type="button"
 								onClick={() => exportToCSV(occurrences)}
-								className="flex items-center gap-2 bg-[#16a34a] hover:bg-[#15803d] text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
+								disabled={occurrences.length === 0}
+								className="flex items-center gap-2 bg-[#16a34a] hover:bg-[#15803d] disabled:bg-gray-300 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
 							>
 								<FileText className="w-4 h-4" />
 								Exportar CSV
@@ -551,7 +563,6 @@ export default function Admin() {
 											key={occ._id}
 											className="bg-white rounded-2xl shadow-sm p-4 space-y-3"
 										>
-											{/* Tipo + Data + Delete */}
 											<div className="flex items-center justify-between">
 												<span
 													className="text-xs font-bold px-3 py-1 rounded-full text-white uppercase"
@@ -573,7 +584,6 @@ export default function Admin() {
 												</div>
 											</div>
 
-											{/* Usuário */}
 											<div className="bg-[#eff6ff] rounded-xl p-3 space-y-1">
 												<p className="text-xs font-bold text-[#1e3a8a]">
 													{occ.userId?.fullName || "—"}
@@ -588,7 +598,6 @@ export default function Admin() {
 												</div>
 											</div>
 
-											{/* Endereço */}
 											<div className="flex items-start gap-2">
 												<AlertTriangle className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
 												<p className="text-xs text-gray-500">{occ.address}</p>
@@ -600,85 +609,90 @@ export default function Admin() {
 						)}
 					</div>
 				)}
+
 				{/* ── MAP TAB ── */}
 				{activeTab === "map" && (
 					<div className="mt-4">
 						<div className="bg-white rounded-2xl shadow-sm overflow-hidden">
 							<div className="h-[600px]">
-							<MapContainer
-								center={
-									(userLocation || {
-										lat: -23.5505,
-										lng: -46.6333,
-									}) as LatLngExpression
-								}
-								// ↑ ↑ usa a localização real do usuário se disponível, caso contrario fallback são paulo
-								zoom={12}
-								// ↑ zoom um pouco menor que no app para dar uma visão mais ampla da cidade
-								zoomControl={true}
-								style={{ width: "100%", height: "100%" }}
-							>
-								<TileLayer
-									url={`https://maps.geoapify.com/v1/tile/osm-bright/{z}/{x}/{y}.png?apiKey=${GEOAPIFY_API_KEY}`}
-									attribution='Powered by <a href="https://www.geoapify.com/" target="_blank">Geoapify</a> | © OpenStreetMap contributors'
-									maxZoom={20}
-								/>
-								<RecenterMap
+								<MapContainer
 									center={
 										(userLocation || {
 											lat: -23.5505,
 											lng: -46.6333,
 										}) as LatLngExpression
 									}
-								/>
-								{mapOccurrences
-									.filter(
-										(occ) =>
-											occ.latitude !== undefined &&
-											occ.longitude !== undefined &&
-											occ.latitude !== null &&
-											occ.longitude !== null,
-									)
-									// ↑ filtra ocorrências sem coordenadas para evitar erro no mapa
-									.map((occ) => (
-										<Marker
-											key={occ._id}
-											position={[Number(occ.latitude), Number(occ.longitude)]}
-											// ↑ posiciona o marker nas coordenadas da ocorrência
-											icon={createMarkerIcon(
-												OCCURRENCE_TYPES[
-													occ.type
-														.toLowerCase()
-														.trim() as keyof typeof OCCURRENCE_TYPES
-												]?.color || "#000000",
-											)}
-											// ↑ usa a cor do tipo da ocorrência para colorir o marker
-										>
-											{/*
-												Popup como filho do Marker: abre sozinho ao
-												clicar, fecha o anterior automaticamente ao
-												abrir outro. O estado selectedMapOccurrence
-												não precisa mais controlar abertura/fechamento
-												manualmente como fazia com o InfoWindow do Google.
-											*/}
-											<Popup>
-												<div style={{ maxWidth: "200px" }}>
-													<h3 style={{ fontWeight: "bold", marginBottom: "4px" }}>
-														{occ.type.toUpperCase()}
-													</h3>
-													<p style={{ fontSize: "14px" }}>{occ.description}</p>
-													<p style={{ fontSize: "12px", color: "#6b7280" }}>
-														{formatRelativeTime(occ.createdAt)}
-														{/* ↑ exibe "há 2 horas", "há 3 dias", etc — igual ao Map.tsx */}
-													</p>
-												</div>
-											</Popup>
-										</Marker>
-									))}
-							</MapContainer>
+									zoom={12}
+									zoomControl={true}
+									style={{ width: "100%", height: "100%" }}
+								>
+									<TileLayer
+										url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+										attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+										maxZoom={19}
+									/>
+									<RecenterMap
+										center={
+											(userLocation || {
+												lat: -23.5505,
+												lng: -46.6333,
+											}) as LatLngExpression
+										}
+									/>
+									{mapOccurrences
+										.filter(
+											(occ) =>
+												occ.latitude !== undefined &&
+												occ.longitude !== undefined &&
+												occ.latitude !== null &&
+												occ.longitude !== null,
+										)
+										.map((occ) => (
+											<Marker
+												key={occ._id}
+												position={[Number(occ.latitude), Number(occ.longitude)]}
+												icon={createMarkerIcon(
+													OCCURRENCE_TYPES[
+														occ.type
+															.toLowerCase()
+															.trim() as keyof typeof OCCURRENCE_TYPES
+													]?.color || "#000000",
+												)}
+											>
+												<Popup>
+													<div style={{ maxWidth: "200px" }}>
+														<h3
+															style={{
+																fontWeight: "bold",
+																marginBottom: "4px",
+															}}
+														>
+															{occ.type.toUpperCase()}
+														</h3>
+														<p style={{ fontSize: "14px" }}>
+															{occ.description}
+														</p>
+														<p
+															style={{
+																fontSize: "12px",
+																color: "#6b7280",
+															}}
+														>
+															{formatRelativeTime(occ.createdAt)}
+														</p>
+													</div>
+												</Popup>
+											</Marker>
+										))}
+								</MapContainer>
+							</div>
 						</div>
+						{loadingMap && (
+							<p className="text-center text-gray-400 py-4">
+								Carregando ocorrências...
+							</p>
+						)}
 					</div>
-				</div>
 				)}
 			</main>
 
@@ -692,7 +706,8 @@ export default function Admin() {
 							</p>
 							<button
 								type="button"
-								onClick={() => setShowDocModal(false)}>
+								onClick={() => setShowDocModal(false)}
+							>
 								<X className="w-5 h-5 text-gray-400 hover:text-gray-600" />
 							</button>
 						</div>
@@ -706,8 +721,6 @@ export default function Admin() {
 						</div>
 
 						<div className="flex gap-3 px-5 pb-5">
-							{/* botões só aparecem se o status for PENDENTE */}
-							{/* se já foi aprovado ou reprovado, o admin só visualiza o documento */}
 							{selectedUser.documentStatus === "PENDENTE" && (
 								<>
 									<button
@@ -731,7 +744,6 @@ export default function Admin() {
 								</>
 							)}
 
-							{/* se já foi processado, exibe apenas o status atual */}
 							{selectedUser.documentStatus !== "PENDENTE" && (
 								<div
 									className="flex-1 flex items-center justify-center gap-2 font-bold py-3 rounded-xl"
@@ -809,12 +821,14 @@ export default function Admin() {
 							</div>
 						</div>
 						<div>
-							<label 
-                     htmlFor="deleteReason"
-                     className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-2">
+							<label
+								htmlFor="deleteReason"
+								className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-2"
+							>
 								Motivo da exclusão *
 							</label>
 							<textarea
+								id="deleteReason"
 								value={deleteReason}
 								onChange={(e) => setDeleteReason(e.target.value)}
 								placeholder="Descreva o motivo da exclusão..."
