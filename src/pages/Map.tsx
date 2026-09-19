@@ -15,6 +15,7 @@ import { useLocation, useNavigate } from "react-router";
 import { RecenterMap } from "../components/Recentermap";
 import { OCCURRENCE_TYPES } from "../constants/occurrenceTypes";
 import { OccurrenceBase, useOccurrences } from "../hooks/useOccurrences";
+import { useUserLocation } from "../hooks/useUserLocation";
 import { api } from "../services/api";
 import { formatRelativeTime } from "../utils/dateUtils";
 import { createMarkerIcon } from "../utils/getMarkerIcon";
@@ -33,10 +34,6 @@ export default function Map() {
 		const stored = localStorage.getItem("isGuest");
 		return stored === "true" || location.state?.isGuest || false;
 	});
-	const [userLocation, setUserLocation] = useState<{
-		lat: number;
-		lng: number;
-	} | null>(null);
 	const [cityName, setCityName] = useState<string>("Buscando...");
 
 	// Hook unificado — substitui o useEffect + useState antigos
@@ -58,47 +55,8 @@ export default function Map() {
 		setIsGuest(newIsGuest);
 	}, [location.state]);
 
-	// Buscar localização do usuário (web e nativo)
-	useEffect(() => {
-		const getLocation = async () => {
-			try {
-				// Detecta plataforma — Capacitor funciona só no Android/iOS
-				const isNative =
-					typeof window !== "undefined" &&
-					// @ts-expect-error - Capacitor injeta essa var global no native
-					(window.Capacitor?.isNativePlatform?.() ?? false);
-
-				if (isNative) {
-					const { Geolocation } = await import("@capacitor/geolocation");
-					const permission = await Geolocation.requestPermissions();
-					if (permission.location === "granted") {
-						const position = await Geolocation.getCurrentPosition();
-						setUserLocation({
-							lat: position.coords.latitude,
-							lng: position.coords.longitude,
-						});
-					}
-				} else if (navigator.geolocation) {
-					// Web — usa API nativa do navegador
-					navigator.geolocation.getCurrentPosition(
-						(position) => {
-							setUserLocation({
-								lat: position.coords.latitude,
-								lng: position.coords.longitude,
-							});
-						},
-						(error) => {
-							console.warn("Geolocation não disponível:", error.message);
-						},
-						{ timeout: 10000 },
-					);
-				}
-			} catch (error) {
-				console.error("Erro ao obter localização:", error);
-			}
-		};
-		getLocation();
-	}, []);
+	// Hook unificado de geolocalização (funciona em web E nativo/APK)
+	const { location: userLocation } = useUserLocation();
 
 	// Buscar nome da cidade
 	useEffect(() => {
