@@ -148,7 +148,7 @@ export default function Admin() {
 	} = useOccurrences<AuditOccurrence>({
 		endpoint: "/admin/occurrences",
 		limit: 50,
-		manual: true,
+		enabled: false,
 	});
 
 	// Hook de ocorrências do mapa (com lat/lng)
@@ -159,7 +159,7 @@ export default function Admin() {
 	} = useOccurrences<MapOccurrence>({
 		endpoint: "/public/occurrences",
 		limit: 200, // mapa mostra mais
-		manual: true,
+		enabled: false,
 	});
 
 	// Document modal

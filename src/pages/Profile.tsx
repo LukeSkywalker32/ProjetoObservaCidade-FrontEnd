@@ -59,7 +59,7 @@ const Profile: React.FC = () => {
 	} = useOccurrences<Occurrence>({
 		endpoint: "/private/occurrences/me",
 		limit: 50,
-		manual: true,
+		enabled: false
 	});
 
 	const handleAvatarClick = () => {
