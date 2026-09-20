@@ -1,14 +1,29 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { useCallback } from "react";
 import { api } from "../services/api";
+
+/**
+ * Hook genérico pra consumir endpoints paginados de ocorrências.
+ *
+ * AGORA USANDO TANSTACK QUERY:
+ * - Cache automático entre componentes
+ * - Refetch ao focar a aba
+ * - Deduplicação de requests simultâneos
+ * - Retry automático em erro de rede
+ * - Stale-while-revalidate (mostra cache + atualiza em background)
+ *
+ */
 
 export interface UseOccurrencesOptions {
   endpoint: string;
-  /** Quantos itens por página (default: 50, máx: 100 no backend) */
   limit?: number;
-  /** Filtros adicionais (viram query params) */
   filters?: Record<string, string | number | undefined>;
   /** Se true, não faz fetch automático no mount */
-  manual?: boolean;
+  enabled?: boolean;
 }
 
 export interface OccurrenceBase {
@@ -29,124 +44,144 @@ interface PaginatedResponse<T> {
   occurrences: T[];
 }
 
+interface QueryData<T> {
+  occurrences: T[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+function buildQueryKey(
+  endpoint: string,
+  page: number,
+  limit: number,
+  filters?: Record<string, string | number | undefined>,
+) {
+  // Filtra valores undefined/null pra query key ficar estável
+  const cleanFilters = filters
+    ? Object.fromEntries(
+        Object.entries(filters).filter(
+          ([, v]) => v !== undefined && v !== null && v !== "",
+        ),
+      )
+    : {};
+
+  return [endpoint, page, limit, cleanFilters] as const;
+}
+
+async function fetchOccurrences<T>(
+  endpoint: string,
+  page: number,
+  limit: number,
+  filters?: Record<string, string | number | undefined>,
+): Promise<QueryData<T>> {
+  const params: Record<string, string | number> = { page, limit };
+
+  if (filters) {
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== null && value !== "") {
+        params[key] = value;
+      }
+    }
+  }
+
+  const response = await api.get(endpoint, { params });
+  const data = response.data;
+
+  // Detecta formato: paginado (objeto) ou legado (array)
+  if (Array.isArray(data)) {
+    return {
+      occurrences: data as T[],
+      page: 1,
+      limit: data.length,
+      total: data.length,
+      totalPages: 1,
+    };
+  }
+
+  const paginated = data as PaginatedResponse<T>;
+  return {
+    occurrences: paginated.occurrences ?? [],
+    page: paginated.page ?? 1,
+    limit: paginated.limit ?? limit,
+    total: paginated.total ?? 0,
+    totalPages: paginated.totalPages ?? 1,
+  };
+}
+
 export function useOccurrences<T extends OccurrenceBase = OccurrenceBase>({
   endpoint,
   limit = 50,
   filters = {},
-  manual = false,
+  enabled = true,
 }: UseOccurrencesOptions) {
-  const [occurrences, setOccurrences] = useState<T[]>([]);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
-  // Ref pra evitar loop em filters (objeto novo a cada render)
-  const filtersRef = useRef(filters);
-  filtersRef.current = filters;
+  // Query principal — sempre carrega página 1 por padrão
+  const mainQuery = useQuery({
+    queryKey: buildQueryKey(endpoint, 1, limit, filters),
+    queryFn: () => fetchOccurrences<T>(endpoint, 1, limit, filters),
+    enabled,
+    placeholderData: keepPreviousData, // mantém dados antigos enquanto carrega novos
+  });
 
-  const pageRef = useRef(page);
-  pageRef.current = page;
-
-  // A função real que faz o fetch (muda só quando endpoint/limit mudam)
-  const fetchPage = useCallback(
-    async (pageNum: number) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const params: Record<string, string | number> = {
-          page: pageNum,
-          limit,
-        };
-
-        for (const [key, value] of Object.entries(filtersRef.current)) {
-          if (value !== undefined && value !== null && value !== "") {
-            params[key] = value;
-          }
-        }
-
-        const response = await api.get(endpoint, { params });
-        const data = response.data;
-
-        if (Array.isArray(data)) {
-          setOccurrences(data as T[]);
-          setTotal(data.length);
-          setTotalPages(1);
-        } else {
-          const paginated = data as PaginatedResponse<T>;
-          setOccurrences(paginated.occurrences ?? []);
-          setTotal(paginated.total ?? 0);
-          setTotalPages(paginated.totalPages ?? 1);
-        }
-
-        setPage(pageNum);
-      } catch (err) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : "Erro ao carregar ocorrências";
-        setError(message);
-      } finally {
-        setLoading(false);
-      }
+  // Handlers de paginação — usam queryClient.fetchQuery pra carregar sob demanda
+  const goToPage = useCallback(
+    async (pageNum: number): Promise<void> => {
+      await queryClient.fetchQuery({
+        queryKey: buildQueryKey(endpoint, pageNum, limit, filters),
+        queryFn: () => fetchOccurrences<T>(endpoint, pageNum, limit, filters),
+      });
     },
-    [endpoint, limit],
+    [queryClient, endpoint, limit, filters],
   );
 
-  // Ref da fetchPage atual — usado pelas funções estáveis abaixo
-  const fetchPageRef = useRef(fetchPage);
-  fetchPageRef.current = fetchPage;
-
-  // ============================================
-  // Funções ESTÁVEIS — não mudam de referência.
-  // Use estas em arrays de deps de useEffect.
-  // ============================================
-  const stableFetch = useCallback((pageNum: number) => {
-    return fetchPageRef.current(pageNum);
-  }, []);
-
-  const stableNextPage = useCallback(() => {
-    if (pageRef.current < totalPages) {
-      return fetchPageRef.current(pageRef.current + 1);
+  const nextPage = useCallback(async (): Promise<void> => {
+    if (!mainQuery.data || mainQuery.data.totalPages <= mainQuery.data.page) {
+      return;
     }
-    return Promise.resolve();
-  }, [totalPages]);
+    await goToPage(mainQuery.data.page + 1);
+  }, [mainQuery.data, goToPage]);
 
-  const stablePrevPage = useCallback(() => {
-    if (pageRef.current > 1) {
-      return fetchPageRef.current(pageRef.current - 1);
+  const prevPage = useCallback(async (): Promise<void> => {
+    if (!mainQuery.data || mainQuery.data.page <= 1) return;
+    await goToPage(mainQuery.data.page - 1);
+  }, [mainQuery.data, goToPage]);
+
+  const refresh = useCallback(async (): Promise<void> => {
+    if (mainQuery.data) {
+      await queryClient.invalidateQueries({
+        queryKey: buildQueryKey(endpoint, mainQuery.data.page, limit, filters),
+      });
     }
-    return Promise.resolve();
-  }, []);
+  }, [queryClient, endpoint, limit, mainQuery.data, filters]);
 
-  const stableRefresh = useCallback(() => {
-    return fetchPageRef.current(pageRef.current);
-  }, []);
-
-  // Fetch automático no mount (a menos que `manual`)
-  // Depende só de endpoint/limit/manual — não muda com loading/error
-  useEffect(() => {
-    if (!manual) {
-      fetchPage(1);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [endpoint, limit, manual]);
+  // Pega a página atual do cache (se existir) — útil pra mostrar
+  const currentPageData =
+    mainQuery.data?.page ?? 1;
 
   return {
-    occurrences,
-    page,
+    occurrences: mainQuery.data?.occurrences ?? [],
+    page: currentPageData,
     limit,
-    totalPages,
-    total,
-    loading,
-    error,
-    hasNext: page < totalPages,
-    hasPrev: page > 1,
-    fetch: stableFetch,
-    nextPage: stableNextPage,
-    prevPage: stablePrevPage,
-    goToPage: stableFetch,
-    refresh: stableRefresh,
+    totalPages: mainQuery.data?.totalPages ?? 1,
+    total: mainQuery.data?.total ?? 0,
+    loading: mainQuery.isPending || mainQuery.isFetching,
+    error:
+      mainQuery.error instanceof Error
+        ? mainQuery.error.message
+        : mainQuery.error
+          ? "Erro ao carregar ocorrências"
+          : null,
+    hasNext: mainQuery.data
+      ? mainQuery.data.page < mainQuery.data.totalPages
+      : false,
+    hasPrev: mainQuery.data ? mainQuery.data.page > 1 : false,
+    fetch: goToPage,
+    nextPage,
+    prevPage,
+    goToPage,
+    refresh,
   };
 }
