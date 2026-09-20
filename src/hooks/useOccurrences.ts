@@ -150,11 +150,13 @@ export function useOccurrences<T extends OccurrenceBase = OccurrenceBase>({
   }, [mainQuery.data, goToPage]);
 
   const refresh = useCallback(async (): Promise<void> => {
-    if (mainQuery.data) {
-      await queryClient.invalidateQueries({
-        queryKey: buildQueryKey(endpoint, mainQuery.data.page, limit, filters),
-      });
-    }
+    
+    // fetchQuery retorna do cache se existir, senão faz a request
+    const pageNum = mainQuery.data?.page ?? 1;
+    await queryClient.fetchQuery({
+      queryKey: buildQueryKey(endpoint, pageNum, limit, filters),
+      queryFn: () => fetchOccurrences<T>(endpoint, pageNum, limit, filters),
+    });
   }, [queryClient, endpoint, limit, mainQuery.data, filters]);
 
   // Pega a página atual do cache (se existir) — útil pra mostrar
