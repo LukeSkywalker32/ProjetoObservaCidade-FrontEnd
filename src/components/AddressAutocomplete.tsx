@@ -2,9 +2,29 @@ import { MapPin, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../services/api";
 
+/**
+ * Dados extras retornados pelo Geoapify quando o usuário seleciona uma sugestão.
+ * Retornados pro Register.tsx pra preencher state/city/lat/lng automaticamente
+ * — sem precisar geocodificar de novo no backend.
+ */
+export interface SelectedAddress {
+  address: string;
+  city: string;
+  state: string;
+  lat: number;
+  lng: number;
+}
+
 interface AddressAutocompleteProps {
   value: string;
   onChange: (value: string) => void;
+  /**
+   * ✅ NOVO: dispara quando user clica numa sugestão do dropdown.
+   * Traz cidade, estado e coordenadas do endereço selecionado.
+   * Quando user digita manualmente (sem selecionar sugestão), NÃO dispara —
+   * nesse caso o backend vai geocodificar.
+   */
+  onSelect?: (data: SelectedAddress) => void;
   userLocation?: { lat: number; lng: number } | null;
   placeholder?: string;
 }
@@ -19,11 +39,14 @@ interface GeoapifySuggestion {
   city?: string;
   county?: string;
   state?: string;
+  lat?: number;
+  lon?: number;
 }
 
 export function AddressAutocomplete({
   value,
   onChange,
+  onSelect,
   userLocation,
   placeholder = "Digite o endereço...",
 }: AddressAutocompleteProps) {
@@ -45,8 +68,6 @@ export function AddressAutocomplete({
     debounceRef.current = setTimeout(async () => {
       setIsLoading(true);
       try {
-        // Antes: chamava Geoapify direto com a chave no bundle.
-        // Agora: chama o proxy do backend. Chave fica protegida.
         const params: Record<string, string> = {
           text: value,
           limit: "5",
@@ -106,6 +127,18 @@ export function AddressAutocomplete({
     onChange(cleanAddress);
     setShowSuggestions(false);
     setSuggestions([]);
+
+    // ✅ NOVO: dispara callback com cidade, estado e coordenadas do endereço
+    // selecionado. Assim o Register.tsx salva tudo certo sem geocodificar de novo.
+    if (onSelect && typeof suggestion.lat === "number" && typeof suggestion.lon === "number") {
+      onSelect({
+        address: cleanAddress,
+        city: suggestion.city || suggestion.county || "",
+        state: suggestion.state || "",
+        lat: suggestion.lat,
+        lng: suggestion.lon,
+      });
+    }
   };
 
   const handleClear = () => {

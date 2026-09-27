@@ -1,5 +1,11 @@
+import axios from "axios";
 import { createContext, useContext, useEffect, useState } from "react";
-import { api } from "../services/api";
+import {
+  api,
+  clearTokens,
+  setTokens,
+  getAccessToken,
+} from "../services/api";
 
 interface User {
   id: string;
@@ -19,7 +25,7 @@ interface AuthContextType {
   isGuest: boolean;
   loading: boolean;
   login: (email: string, password: string) => Promise<User>;
-  logout: () => void;
+  logout: () => Promise<void>;
   updateAvatar: (avatarUrl: string) => void;
 }
 
@@ -27,20 +33,18 @@ const AuthContext = createContext({} as AuthContextType);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(getAccessToken());
   const [isGuest, setIsGuest] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const storedToken = localStorage.getItem("token");
     const guest = localStorage.getItem("isGuest");
 
     if (guest === "true") {
       setIsGuest(true);
     }
 
-    if (storedToken) {
-      setToken(storedToken);
+    if (getAccessToken()) {
       loadUser().finally(() => setLoading(false));
     } else {
       setLoading(false);
@@ -52,34 +56,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const response = await api.get("/private/me");
       setUser(response.data);
     } catch {
-      logout();
+      setUser(null);
     }
   }
 
   async function login(email: string, password: string): Promise<User> {
-    try {
-      const response = await api.post("/auth/login", {
-        login: email,
-        password,
-      });
+    const response = await api.post("/auth/login", {
+      login: email,
+      password,
+    });
 
-      const { token: newToken, user: userData } = response.data;
-      localStorage.setItem("token", newToken);
-      localStorage.removeItem("isGuest");
+    const { accessToken, refreshToken, user: userData } = response.data;
 
-      setToken(newToken);
-      setUser(userData);
-      setIsGuest(false);
+    setTokens(accessToken, refreshToken);
+    localStorage.removeItem("isGuest");
 
-      return userData;
-    } catch (error) {
-      throw error;
-    }
+    setToken(accessToken);
+    setUser(userData);
+    setIsGuest(false);
+
+    return userData;
   }
 
-  function logout() {
-    localStorage.removeItem("token");
-    localStorage.removeItem("isGuest");
+  async function logout(): Promise<void> {
+    try {
+      await axios.post(
+        `${import.meta.env.VITE_API_URL}/auth/logout`,
+        { refreshToken: localStorage.getItem("refreshToken") },
+      );
+    } catch {
+      // Ignora — desloga de qualquer jeito
+    }
+    clearTokens();
     setUser(null);
     setToken(null);
     setIsGuest(false);
